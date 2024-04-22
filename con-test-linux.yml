@@ -1,0 +1,161 @@
+description: SAP SSM Start/Stop Operations for HA (High Availability) systems.
+schemaVersion: '0.3'
+assumeRole: '{{ AutomationAssumeRole }}'
+parameters:
+  AutomationAssumeRole:
+    default: ''
+    description: (Optional) ARN of the role allowing Automation actions.
+    type: String
+  HostsAndPorts:
+    type: String
+    description: (Required) Target endpoint and ports for which the test connectivity is conducted. Use '| pipe' to separate connections and use ', comma' to separate ports (for example, 127.0.0.1:22,443|google.com:443|10.10.10.10:21 and so on...)
+    allowedPattern: ^(?:(?:\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})|([a-zA-Z0-9.-]+))(?::(\d+(?:,\d+)*))?(?:\|(?:(?:\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})|([a-zA-Z0-9.-]+))(?::(\d+(?:,\d+)*))?)*$
+  s3Bucket:
+    type: String
+    description: (Required) Input the S3 Bucket that will be used to store the CSV ouput file.
+  SID:
+    description: (Required) SID to stop or start
+    type: String
+  SIDTagKey:
+    description: (Required) Tag Key for SID Storage
+    type: String
+    default: APPID
+mainSteps:
+  - name: QUERY_AWS_APPInstanceId
+    action: aws:executeAwsApi
+    nextStep: Perform_Connectivity_Test
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Filters:
+        - Values:
+            - '*{{SID}}*'
+          Name: tag:{{SIDTagKey}}
+      Service: ec2
+      Api: DescribeInstances
+    outputs:
+      - Type: StringList
+        Name: APPInstanceIds
+        Selector: $.Reservations..Instances[?(@.State.Name == 'running')].InstanceId
+  - name: Perform_Connectivity_Test
+    action: aws:runCommand
+    maxAttempts: 1
+    isEnd: true
+    onFailure: Abort
+    inputs:
+      TimeoutSeconds: 30
+      Parameters:
+        commands:
+          - '#!/bin/bash'
+          - ''
+          - '# Variables'
+          - execution_count=0
+          - source_hostname=$(hostname)
+          - source_ip=$(hostname -i)
+          - ''
+          - '# Create CSV file and file header'
+          - csv_file="/tmp/$source_hostname""_connectivity_results.csv"
+          - echo "Source Server, Source IP, Target, Port, Ping Result, Telnet Result" > "$csv_file"
+          - ''
+          - '# Function to perform ping test'
+          - perform_ping() {
+          - '    local host="$1"'
+          - '    local sourceHN="$2"'
+          - '    local sourceIP="$3"'
+          - '    '
+          - '    echo "Performing ping to ''$host''..."'
+          - '    ping -c 1 "$host" > /dev/null 2>&1'
+          - '    '
+          - '    if [ $? -eq 0 ]; then'
+          - '        ping_status="SUCCESSFUL PING TEST"'
+          - '        echo "Result: $ping_status"'
+          - '        telnet_status="***THIS IS FOR PING TEST ONLY***"'
+          - '    else'
+          - '        ping_status="FAILED PING TEST. Please check connectivity configuration"'
+          - '        echo "Result: $ping_status"'
+          - '        telnet_status="***THIS IS FOR PING TEST ONLY***"'
+          - '    fi'
+          - '}'
+          - ''
+          - '# Function to perform telnet test'
+          - perform_telnet() {
+          - '    local host="$1"'
+          - '    local port="$2"'
+          - '    local sourceHN="$3"'
+          - '    local sourceIP="$4"'
+          - '    '
+          - '    echo "Performing telnet test to ''$host'' on port ''$port''..."'
+          - '    echo "quit" | timeout --signal=9 2 curl -v telnet://$host:$port > /dev/null 2>&1'
+          - '    '
+          - '    if [ $? -eq 0 ]; then'
+          - '        telnet_status="SUCCESSFUL TELNET TEST"'
+          - '        echo "Result: $telnet_status"'
+          - '    else'
+          - '        telnet_status="FAILED TELNET TEST. Please check AWS Security Group or Firewall."'
+          - '        echo "Result: $telnet_status"'
+          - '    fi'
+          - '}'
+          - ''
+          - '# Function to perform testing'
+          - perform_testing() {
+          - '    local host="$1"'
+          - '    local port="$2"'
+          - '    local sourceHN="$3"'
+          - '    local sourceIP="$4"'
+          - '    '
+          - '    if [ "$port" == "Ping" ]; then'
+          - '        perform_ping "$host" "$sourceHN" "$sourceIP"'
+          - '    else'
+          - '        perform_telnet "$host" "$port" "$sourceHN" "$sourceIP"'
+          - '    fi'
+          - '    '
+          - '    echo "$sourceHN,$sourceIP,$host,$port,$ping_status,$telnet_status" >> "$csv_file"'
+          - '}'
+          - ''
+          - '# Function to upload the CSV file to S3'
+          - upload_CSV_to_s3() {
+          - '    #local s3="s3://df-trainbucket/output_folder/"'
+          - '    local s3=''{{s3Bucket}}'''
+          - '    aws s3 cp "$csv_file" "$s3"'
+          - '    '
+          - '    if [ $? -eq 0 ]; then'
+          - '        echo "Successfully uploaded to $s3"'
+          - '        rm -f $csv_file'
+          - '        echo "Deleted $csv_file file on this server $source_hostname"'
+          - '    else'
+          - '        echo $''\n''"Error uploading $csv_file file to $s3. Please check the role of server $source_hostname to $s3"'
+          - '        rm -f $csv_file'
+          - '        echo "Deleted $csv_file file on this server $source_hostname"'
+          - '    fi'
+          - '}'
+          - ''
+          - '# Main function'
+          - main() {
+          - '    IFS=''|'' read -ra targetlist <<< ''{{HostsAndPorts}}'''
+          - ''
+          - '    for target in "${targetlist[@]}"; do'
+          - '        ((execution_count++))'
+          - '        echo "** CONNECTIVITY TESTING NUMBER $execution_count TO ''$target'' **"'
+          - ''
+          - '        IFS='':'' read -r -a target_parts <<< "$target"'
+          - '        target_server="${target_parts[0]}"'
+          - '        target_ports="${target_parts[@]:1}"'
+          - ''
+          - '        perform_testing "$target_server" "Ping" "$source_hostname" "$source_ip"'
+          - ''
+          - '        IFS='','' read -ra ports_array <<< "$target_ports"'
+          - '        for port in "${ports_array[@]}"; do'
+          - '            perform_testing "$target_server" "$port" "$source_hostname" "$source_ip"'
+          - '        done  '
+          - '    done'
+          - ''
+          - '    echo "==============================================================================="$''\n''"CONNECTIVITY TESTING COMPLETED!"'
+          - '    upload_CSV_to_s3'
+          - '}'
+          - ''
+          - '# Execute the main function'
+          - main
+          - ''
+          - exit
+      InstanceIds: '{{ QUERY_AWS_APPInstanceId.APPInstanceIds }}'
+      DocumentName: AWS-RunShellScript
