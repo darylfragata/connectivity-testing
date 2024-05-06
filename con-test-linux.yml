@@ -9,15 +9,14 @@ parameters:
   HostsAndPorts:
     type: String
     description: (Required) Target endpoint and ports for which the test connectivity is conducted. Use '| pipe' to separate connections and use ', comma' to separate ports (for example, 127.0.0.1:22,443|google.com:443|10.10.10.10:21 and so on...)
-    allowedPattern: ^(?:(?:\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})|([a-zA-Z0-9.-]+))(?::(\d+(?:,\d+)*))?(?:\|(?:(?:\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})|([a-zA-Z0-9.-]+))(?::(\d+(?:,\d+)*))?)*$
   s3Bucket:
     type: String
     description: (Required) Input the S3 Bucket that will be used to store the CSV ouput file.
   SID:
-    description: (Required) SID to stop or start
+    description: (Required) SID of system to perform connectivity test.
     type: String
   SIDTagKey:
-    description: (Required) Tag Key for SID Storage
+    description: (Required) Tag Key for SID
     type: String
     default: APPID
 mainSteps:
@@ -55,7 +54,7 @@ mainSteps:
           - ''
           - '# Create CSV file and file header'
           - csv_file="/tmp/$source_hostname""_connectivity_results.csv"
-          - echo "Source Server, Source IP, Target, Port, Ping Result, Telnet Result" > "$csv_file"
+          - echo "SID, Source Server, Source IP, Target, Port, Ping Result, Telnet Result" > "$csv_file"
           - ''
           - '# Function to perform ping test'
           - perform_ping() {
@@ -102,6 +101,7 @@ mainSteps:
           - '    local port="$2"'
           - '    local sourceHN="$3"'
           - '    local sourceIP="$4"'
+          - '    local sid=''{{SID}}'''
           - '    '
           - '    if [ "$port" == "Ping" ]; then'
           - '        perform_ping "$host" "$sourceHN" "$sourceIP"'
@@ -109,7 +109,7 @@ mainSteps:
           - '        perform_telnet "$host" "$port" "$sourceHN" "$sourceIP"'
           - '    fi'
           - '    '
-          - '    echo "$sourceHN,$sourceIP,$host,$port,$ping_status,$telnet_status" >> "$csv_file"'
+          - '    echo "$sid,$sourceHN,$sourceIP,$host,$port,$ping_status,$telnet_status" >> "$csv_file"'
           - '}'
           - ''
           - '# Function to upload the CSV file to S3'
@@ -145,8 +145,16 @@ mainSteps:
           - ''
           - '        IFS='','' read -ra ports_array <<< "$target_ports"'
           - '        for port in "${ports_array[@]}"; do'
-          - '            perform_testing "$target_server" "$port" "$source_hostname" "$source_ip"'
-          - '        done  '
+          - '            # Check if port is a range'
+          - '            if [[ "$port" == *-* ]]; then'
+          - '                IFS=''-'' read -r start_port end_port <<< "$port"'
+          - '                for ((p=start_port; p<=end_port; p++)); do'
+          - '                    perform_testing "$target_server" "$p" "$source_hostname" "$source_ip"'
+          - '                done'
+          - '            else'
+          - '                perform_testing "$target_server" "$port" "$source_hostname" "$source_ip"'
+          - '            fi'
+          - '        done'
           - '    done'
           - ''
           - '    echo "==============================================================================="$''\n''"CONNECTIVITY TESTING COMPLETED!"'
