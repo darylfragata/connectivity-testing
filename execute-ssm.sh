@@ -1,20 +1,24 @@
 #!/bin/bash
-
-# Define your inputs
-AWS_REGION="ap-northeast-1"
-DOCUMENT_NAME="ConnTest"
-DOCUMENT_VERSION="\$DEFAULT"
-ASSUME_ROLE_ARN="arn:aws:iam::458198004777:role/partial-hours-role"
-S3_BUCKET="s3://dfragata-test-bucket/connectivity-output/"
+################################################
+# Define the source system
 SIDS=("HCQ" "GTQ" "TPD" "EPD")
-SID_TAG_KEY="APPID"
 
-# Define hosts and ports for each SID
+
+# Define target hosts and ports for each SID
 declare -A HOSTS_AND_PORTS
 HOSTS_AND_PORTS["GTQ"]="google.com:440-445,79-81|bpi.com.ph|example.com:22,443,80,123|openai.com:443,8080|facebook.com:443,80"
 HOSTS_AND_PORTS["HCQ"]="example.org:443,8080|test.com:443,22|openai.com:443,8080-8085|facebook.com:440-445,78-83|youtube.com:443,80,22"
 HOSTS_AND_PORTS["TPD"]="142.251.220.238:440-445,79-81|bpi.com.ph|142.251.220.238:22,443,80,123|openai.com:443,8080|facebook.com:443,80"
 HOSTS_AND_PORTS["EPD"]="142.251.220.238:440-445,79-81|bpi.com.ph|142.251.220.238:22,443,80,123|openai.com:443,8080|facebook.com:443,80"
+
+
+AWS_REGION="ap-northeast-1"
+DOCUMENT_NAME="ConnTest"
+DOCUMENT_VERSION="\$DEFAULT"
+ASSUME_ROLE_ARN="arn:aws:iam::458198004777:role/partial-hours-role"
+S3_BUCKET="s3://dfragata-test-bucket/connectivity-output/"
+SID_TAG_KEY="APPID"
+#################################################
 
 # Array to store Automation Execution IDs
 AUTOMATION_EXECUTION_IDS=()
